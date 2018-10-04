@@ -1,7 +1,7 @@
 import pycwt as wavelet
 from pycwt.helpers import find
 import numpy as np
-from func_helper import pip, mapping, filtering, reducing, identity
+from func_helper import pip, mapping, filtering, reducing, identity, over_args
 from matpos import MatPos
 import matplotlib.pyplot as plt
 
@@ -637,7 +637,7 @@ class CWT:
 
         return self
 
-    def plot(self, subgrids=None, style={}):
+    def plot(self, subgrids=None, style={}, **kwargs):
         """
         Generate figure with 4 sub plots.
 
@@ -664,25 +664,35 @@ class CWT:
             "titleSize": 16,
             **style
         }
+
+        padding={
+            "left" :1,
+            "right" : 0.5,
+            "top" : 0.5,
+            "bottom" : 1
+        }
+
         mp = MatPos()
 
         a = mp.add_bottom(mp, (16, 4))
-        b = mp.add_bottom(a, (16, 7), offset=(0, 1), sharex=a)
-        c = mp.add_right(b, (5, 7), offset=(0.5, 0), sharey=b)
-        d = mp.add_bottom(b, (16, 4), offset=(0, 1), sharex=a)
+        b = mp.add_bottom(a, (16, 7), margin=1, sharex=a)
+        c = mp.add_right(b, (5, 7), margin=0.5, sharey=b)
+        d = mp.add_bottom(b, (16, 4), margin=1, sharex=a)
 
-        fig, axes = mp.figure_and_axes(
-            subgrids) if subgrids is not None else mp.figure_and_axes([a, b, c, d])
+        fig, axs = mp.figure_and_axes(
+            subgrids, padding, **kwargs) if subgrids is not None else mp.figure_and_axes([a, b, c, d], padding, **kwargs)
 
-        axes = pip(
-            self.plotSignal(),
-            self.plotSpector(),
-            self.plotGlobalPower(),
-            self.plotAverageScale(),
-            self.setTextSize()
-        )(axes)
+        axs = over_args(
+            self.setTextSize(),
+            [
+                self.plotSignal(),
+                self.plotSpector(),
+                self.plotGlobalPower(),
+                self.plotAverageScale()
+            ]
+        )(*axs)
 
-        return (fig, dict(zip(["a", "b", "c", "d"], axes)))
+        return (fig, dict(zip(["a", "b", "c", "d"], axs)))
 
     def setTextSize(self):
         def plot(axes):
@@ -696,8 +706,8 @@ class CWT:
         """
         Plot original signal and inversed signal.
         """
-        def plot(axes):
-            ax = axes[0]
+        def plot(ax):
+
             ax.plot(self.t, self.iwave, '-',
                     linewidth=2, color=[0.5, 0.5, 0.5])
             ax.plot(self.t, CWT.detrend(self.signal),
@@ -705,7 +715,7 @@ class CWT:
             ax.set_title('a) Signal', fontsize=self.style["titleSize"])
             #ax.set_ylabel(r'{} [{}]'.format(label, units))
             ax.set_xlim([self.t.min(), self.t.max()])
-            return axes
+            return ax
         return plot
 
     def plotSpector(self):
@@ -714,9 +724,8 @@ class CWT:
             level contour lines and cone of influece hatched area. Note that period
             scale is logarithmic.
         """
-        def plot(axes):
+        def plot(bx):
 
-            bx = axes[1]
             t = self.t
             dt = self.dt
             period = self.period
@@ -757,7 +766,7 @@ class CWT:
             bx.set_yticks(np.log2(Yticks))
             bx.set_yticklabels(Yticks)
 
-            return axes
+            return bx
         return plot
 
     def plotGlobalPower(self):
@@ -766,8 +775,7 @@ class CWT:
             theoretical noise spectra.
         Note that period scale is logarithmic.
         """
-        def plot(axes):
-            cx = axes[2]
+        def plot(cx):
 
             var = self.std**2
             glbl_power = self.glbl_power
@@ -811,13 +819,12 @@ class CWT:
             cx.set_yticks(np.log2(Yticks))
             cx.set_yticklabels(Yticks)
             plt.setp(cx.get_yticklabels(), visible=False)
-            return axes
+            return cx
         return plot
 
     def plotAverageScale(self):
-        def plot(axes):
+        def plot(dx):
             # Fourth sub-plot, the scale averaged wavelet spectrum.
-            dx = axes[3]
             dx.axhline(
                 self.scale_avg_signif,
                 color='k', linestyle='--', linewidth=1.
@@ -833,5 +840,5 @@ class CWT:
             dx.set_ylabel(r'Average variance []',
                           fontsize=self.style["labelSize"])
 
-            return axes
+            return dx
         return plot
