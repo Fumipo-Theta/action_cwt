@@ -48,9 +48,6 @@ def isAllIn(obj: Dict[Any, Any]) -> Callable[[List[Any]], bool]:
     )
 
 
-
-
-
 class CWT:
 
     def __init__(self, t: VectorD, signal: VectorD, detrend: bool=True, verbose: bool=False) -> None:
@@ -89,6 +86,19 @@ class CWT:
         self.J = -1
         self.freqs = None
         self.threshold = 0.95
+
+        self.style = {
+            "labelSize": 16,
+            "tickSize": 14,
+            "titleSize": 16,
+        }
+
+        self.padding = {
+            "left": 1,
+            "right": 0.5,
+            "top": 0.5,
+            "bottom": 1
+        }
 
     @staticmethod
     def setup(t: VectorD, signal: VectorD, detrend: bool=True, verbose: bool=False):
@@ -658,19 +668,7 @@ class CWT:
         axes["a"].set_ylim([-20,20])
         """
 
-        self.style = {
-            "labelSize": 16,
-            "tickSize": 14,
-            "titleSize": 16,
-            **style
-        }
-
-        padding={
-            "left" :1,
-            "right" : 0.5,
-            "top" : 0.5,
-            "bottom" : 1
-        }
+        self.style.update(style)
 
         mp = MatPos()
 
@@ -680,18 +678,18 @@ class CWT:
         d = mp.add_bottom(b, (16, 4), margin=1, sharex=a)
 
         fig, axs = mp.figure_and_axes(
-            subgrids, padding, **kwargs) if subgrids is not None else mp.figure_and_axes([a, b, c, d], padding, **kwargs)
+            subgrids, self.padding, **kwargs) if subgrids is not None else mp.figure_and_axes([a, b, c, d], self.padding, **kwargs)
 
         axs = over_args(
             self.setTextSize(),
             [
                 self.plotSignal(),
-                self.plotSpector(),
+                pip(self.plotSpector(), self.plotSignificantSpector()),
                 self.plotGlobalPower(),
                 self.plotAverageScale()
             ]
         )(*axs)
-
+        axs[0].set_xlim([self.t.min(), self.t.max()])
         return (fig, dict(zip(["a", "b", "c", "d"], axs)))
 
     def setTextSize(self):
@@ -714,7 +712,7 @@ class CWT:
                     c='#2196f3', linestyle="-", linewidth=1.5)
             ax.set_title('a) Signal', fontsize=self.style["titleSize"])
             #ax.set_ylabel(r'{} [{}]'.format(label, units))
-            ax.set_xlim([self.t.min(), self.t.max()])
+
             return ax
         return plot
 
@@ -735,15 +733,6 @@ class CWT:
             bx.contourf(
                 t, np.log2(period), np.log2(self.power), np.log2(levels),
                 extend='both', cmap=plt.cm.viridis
-            )
-            extent = [t.min(), t.max(), 0, max(period)]
-
-            # contour of significance
-            bx.contour(
-                t, np.log2(period), self.significantPower, [-99, 1],
-                colors='k',
-                linewidths=2,
-                extent=extent
             )
 
             # cone of influence
@@ -769,6 +758,23 @@ class CWT:
             return bx
         return plot
 
+    def plotSignificantSpector(self):
+        def plot(bx):
+            t = self.t
+            period = self.period
+
+            extent = [t.min(), t.max(), 0, max(period)]
+
+            # contour of significance
+            bx.contour(
+                t, np.log2(period), self.significantPower, [-99, 1],
+                colors='k',
+                linewidths=1,
+                extent=extent
+            )
+            return bx
+        return plot
+
     def plotGlobalPower(self):
         """
         Third sub-plot, the global wavelet and Fourier power spectra and
@@ -785,18 +791,6 @@ class CWT:
             fft_power = self.fft_power
             fft_freqs = self.fft_freqs
 
-            # 95% confident spectora
-            cx.plot(
-                glbl_signif, np.log2(period),
-                'k--'
-            )
-
-            # Red noise spectora
-            cx.plot(
-                var * fft_theor, np.log2(period),
-                '--', color='#cccccc'
-            )
-
             # Fourier power spectora
             cx.plot(
                 var * fft_power, np.log2(1./fft_freqs),
@@ -807,6 +801,18 @@ class CWT:
             cx.plot(
                 var * glbl_power, np.log2(period),
                 'k-', linewidth=1.5
+            )
+
+            # 95% confident spectora
+            cx.plot(
+                glbl_signif, np.log2(period),
+                'k--'
+            )
+
+            # Red noise spectora
+            cx.plot(
+                var * fft_theor, np.log2(period),
+                '--', color='#cccccc'
             )
 
             cx.set_title('c) Global Wavelet Spectrum',
