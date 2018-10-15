@@ -2,7 +2,7 @@ import pycwt as wavelet
 from pycwt.helpers import find
 import numpy as np
 from func_helper import pip, mapping, filtering, reducing, identity, over_args
-from matpos import MatPos
+from matpos import Matpos
 import matplotlib.pyplot as plt
 
 from typing import List, Tuple, TypeVar, Union, Callable, Dict, Any, NewType, Type, Optional
@@ -670,7 +670,7 @@ class CWT:
 
         self.style.update(style)
 
-        mp = MatPos()
+        mp = Matpos()
 
         a = mp.add_bottom(mp, (16, 4))
         b = mp.add_bottom(a, (16, 7), margin=1, sharex=a)
@@ -678,13 +678,15 @@ class CWT:
         d = mp.add_bottom(b, (16, 4), margin=1, sharex=a)
 
         fig, axs = mp.figure_and_axes(
-            subgrids, self.padding, **kwargs) if subgrids is not None else mp.figure_and_axes([a, b, c, d], self.padding, **kwargs)
+            subgrids, self.padding, **kwargs
+            ) if subgrids is not None\
+            else mp.figure_and_axes([a, b, c, d], self.padding, **kwargs)
 
         axs = over_args(
             self.setTextSize(),
             [
-                self.plotSignal(),
-                pip(self.plotSpector(), self.plotSignificantSpector()),
+                pip(self.plotSignal(), self.plotInversedSignal()),
+                pip(self.plotSpector(), self.plotSignificantSpector(), self.plotConeOfInfluence()),
                 self.plotGlobalPower(),
                 self.plotAverageScale()
             ]
@@ -700,19 +702,41 @@ class CWT:
             return axes
         return plot
 
-    def plotSignal(self):
+    def plotSignal(self, style={}):
         """
         Plot original signal and inversed signal.
         """
+
+        st = {
+            "c": '#2196f3',
+            "linestyle":"-",
+            "linewidth":1.5,
+            **style
+        }
+
         def plot(ax):
 
-            ax.plot(self.t, self.iwave, '-',
-                    linewidth=2, color=[0.5, 0.5, 0.5])
             ax.plot(self.t, CWT.detrend(self.signal),
-                    c='#2196f3', linestyle="-", linewidth=1.5)
+                    **st)
             ax.set_title('a) Signal', fontsize=self.style["titleSize"])
-            #ax.set_ylabel(r'{} [{}]'.format(label, units))
 
+            return ax
+        return plot
+
+    def plotInversedSignal(self, style={}):
+        """
+        plot inversed signal
+        """
+
+        st = {
+            "c": [0.5, 0.5, 0.5],
+            "linestyle" : "-",
+            "linewidth" : 2,
+            **style
+        }
+
+        def plot(ax):
+            ax.plot(self.t, self.iwave, **st)
             return ax
         return plot
 
@@ -725,9 +749,8 @@ class CWT:
         def plot(bx):
 
             t = self.t
-            dt = self.dt
             period = self.period
-            coi = self.coi
+
 
             levels = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16]
             bx.contourf(
@@ -735,15 +758,6 @@ class CWT:
                 extend='both', cmap=plt.cm.viridis
             )
 
-            # cone of influence
-            bx.fill(
-                np.concatenate(
-                    # [t, t[-1:] + dt, t[-1:] + dt,t[:1] - dt, t[:1] - dt]),
-                    [t, t[-1:], t[-1:], t[:1], t[:1]]),
-                np.concatenate(
-                    [np.log2(coi), [1e-9], np.log2(period[-1:]), np.log2(period[-1:]), [1e-9]]),
-                'k', alpha=0.3, hatch='x'
-            )
             bx.set_ylim([np.log2(period.min()), np.log2(period.max())])
             bx.set_title('b) Wavelet Power Spectrum ',
                          fontsize=self.style["titleSize"])
@@ -758,7 +772,12 @@ class CWT:
             return bx
         return plot
 
-    def plotSignificantSpector(self):
+    def plotSignificantSpector(self, style={}):
+        st = {
+            "linewidths":1,
+            "colors":"k",
+            **style
+        }
         def plot(bx):
             t = self.t
             period = self.period
@@ -768,9 +787,35 @@ class CWT:
             # contour of significance
             bx.contour(
                 t, np.log2(period), self.significantPower, [-99, 1],
-                colors='k',
-                linewidths=1,
-                extent=extent
+                extent=extent,
+                **st
+            )
+            return bx
+        return plot
+
+    def plotConeOfInfluence(self, style={}):
+        """
+        Plot mask of cone of influence
+        """
+        st = {
+            "c" : "k",
+            "alpha" : 0.3,
+            "hatch" : "x",
+            **style
+        }
+
+        def plot(bx):
+            t = self.t
+            period = self.period
+            coi = self.coi
+            # cone of influence
+            bx.fill(
+                np.concatenate(
+                    # [t, t[-1:] + dt, t[-1:] + dt,t[:1] - dt, t[:1] - dt]),
+                    [t, t[-1:], t[-1:], t[:1], t[:1]]),
+                np.concatenate(
+                    [np.log2(coi), [1e-9], np.log2(period[-1:]), np.log2(period[-1:]), [1e-9]]),
+                **st
             )
             return bx
         return plot
