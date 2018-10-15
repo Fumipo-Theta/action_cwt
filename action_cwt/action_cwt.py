@@ -711,6 +711,7 @@ class CWT:
             "c": '#2196f3',
             "linestyle":"-",
             "linewidth":1.5,
+            "alpha":1,
             **style
         }
 
@@ -732,6 +733,7 @@ class CWT:
             "c": [0.5, 0.5, 0.5],
             "linestyle" : "-",
             "linewidth" : 2,
+            "alpha" : 1,
             **style
         }
 
