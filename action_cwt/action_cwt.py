@@ -1,7 +1,8 @@
 import pycwt as wavelet
 from pycwt.helpers import find
 import numpy as np
-from func_helper import pip, mapping, filtering, reducing, identity, over_args
+from func_helper import pip, identity, over_args
+import func_helper.func_helper.iterator as it
 from matpos import Matpos
 import matplotlib.pyplot as plt
 
@@ -25,7 +26,7 @@ VectorD = NewType("VectorD", np.ndarray)
 
 
 def isAllTrue(arr: List[bool]) -> bool:
-    return reducing(lambda a, b: a and b)(arr)(True)
+    return it.reducing(lambda a, b: a and b)(arr)(True)
 
 
 def setLimit(lim: Limit) -> Limit:
@@ -44,7 +45,7 @@ def isInRange(lim: Limit) -> bool:
 
 def isAllIn(obj: Dict[Any, Any]) -> Callable[[List[Any]], bool]:
     return lambda props: isAllTrue(
-        mapping(lambda prop: prop in obj)(props)
+        it.mapping(lambda prop: prop in obj)(props)
     )
 
 
@@ -679,14 +680,15 @@ class CWT:
 
         fig, axs = mp.figure_and_axes(
             subgrids, self.padding, **kwargs
-            ) if subgrids is not None\
+        ) if subgrids is not None\
             else mp.figure_and_axes([a, b, c, d], self.padding, **kwargs)
 
         axs = over_args(
             self.setTextSize(),
             [
                 pip(self.plotSignal(), self.plotInversedSignal()),
-                pip(self.plotSpector(), self.plotSignificantSpector(), self.plotConeOfInfluence()),
+                pip(self.plotSpector(), self.plotSignificantSpector(),
+                    self.plotConeOfInfluence()),
                 self.plotGlobalPower(),
                 self.plotAverageScale()
             ]
@@ -709,9 +711,9 @@ class CWT:
 
         st = {
             "c": '#2196f3',
-            "linestyle":"-",
-            "linewidth":1.5,
-            "alpha":1,
+            "linestyle": "-",
+            "linewidth": 1.5,
+            "alpha": 1,
             **style
         }
 
@@ -731,9 +733,9 @@ class CWT:
 
         st = {
             "c": [0.5, 0.5, 0.5],
-            "linestyle" : "-",
-            "linewidth" : 2,
-            "alpha" : 1,
+            "linestyle": "-",
+            "linewidth": 2,
+            "alpha": 1,
             **style
         }
 
@@ -752,7 +754,6 @@ class CWT:
 
             t = self.t
             period = self.period
-
 
             levels = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16]
             bx.contourf(
@@ -776,10 +777,11 @@ class CWT:
 
     def plotSignificantSpector(self, style={}):
         st = {
-            "linewidths":1,
-            "colors":"k",
+            "linewidths": 1,
+            "colors": "k",
             **style
         }
+
         def plot(bx):
             t = self.t
             period = self.period
@@ -800,9 +802,9 @@ class CWT:
         Plot mask of cone of influence
         """
         st = {
-            "c" : "k",
-            "alpha" : 0.3,
-            "hatch" : "x",
+            "c": "k",
+            "alpha": 0.3,
+            "hatch": "x",
             **style
         }
 
