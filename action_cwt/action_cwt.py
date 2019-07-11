@@ -95,7 +95,7 @@ class CWT:
         }
 
         self.padding = {
-            "left": 1,
+            "left": 2,
             "right": 0.5,
             "top": 0.5,
             "bottom": 1
@@ -673,10 +673,10 @@ class CWT:
 
         mp = Matpos()
 
-        a = mp.add_bottom(mp, (16, 4))
-        b = mp.add_bottom(a, (16, 7), margin=1, sharex=a)
-        c = mp.add_right(b, (5, 7), margin=0.5, sharey=b)
-        d = mp.add_bottom(b, (16, 4), margin=1, sharex=a)
+        a = mp.add_bottom(mp, (10, 3))
+        b = mp.add_bottom(a, (10, 6), margin=1, sharex=a)
+        c = mp.add_right(b, (3, 6), margin=0.5, sharey=b)
+        d = mp.add_bottom(b, (10, 3), margin=1, sharex=a)
 
         fig, axs = mp.figure_and_axes(
             subgrids, self.padding, **kwargs
