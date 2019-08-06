@@ -2,7 +2,7 @@ import pycwt as wavelet
 from pycwt.helpers import find
 import numpy as np
 from func_helper import pip, identity, over_args
-import func_helper.func_helper.iterator as it
+import iter_helper as it
 from matpos import Matpos
 import matplotlib.pyplot as plt
 
