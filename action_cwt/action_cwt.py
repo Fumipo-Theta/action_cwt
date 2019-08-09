@@ -3,7 +3,7 @@ from pycwt.helpers import find
 import numpy as np
 from func_helper import pip, identity, over_args
 import iter_helper as it
-from matpos import Matpos
+from structured_plot import Layout
 import matplotlib.pyplot as plt
 
 from typing import List, Tuple, TypeVar, Union, Callable, Dict, Any, NewType, Type, Optional
@@ -667,21 +667,31 @@ class CWT:
         -------
         fig, axes = cwt.plot({"labelSize" : 20})
         axes["a"].set_ylim([-20,20])
-        """
+         """
 
         self.style.update(style)
 
-        mp = Matpos()
+        layout = Layout()
 
-        a = mp.add_bottom(mp, (10, 3))
-        b = mp.add_bottom(a, (10, 6), margin=1, sharex=a)
-        c = mp.add_right(b, (3, 6), margin=0.5, sharey=b)
-        d = mp.add_bottom(b, (10, 3), margin=1, sharex=a)
+        # Signal and inversed sugnal
+        layout.add_origin("a", (10, 2))
 
-        fig, axs = mp.figure_and_axes(
+        # Mother wavelet
+        layout.add_right("a", "e", (1.5, 1.5), margin=0.25,offset=(0.75,0.25))
+
+        # Spector
+        layout.add_bottom("a", "b", (10, 6), margin=1, sharex="a")
+
+        # Global power spector
+        layout.add_right("b","c", (3,6), margin=0.25, sharey="b" )
+
+        # Variance
+        layout.add_bottom("b","d", (10,2), margin=1, sharex="a")
+
+        fig, axs = layout.figure_and_axes(
             subgrids, self.padding, **kwargs
         ) if subgrids is not None\
-            else mp.figure_and_axes([a, b, c, d], self.padding, **kwargs)
+            else layout.figure_and_axes(["a", "b", "c", "d","e"], self.padding, **kwargs)
 
         axs = over_args(
             self.setTextSize(),
@@ -690,11 +700,13 @@ class CWT:
                 pip(self.plotSpector(), self.plotSignificantSpector(),
                     self.plotConeOfInfluence()),
                 self.plotGlobalPower(),
-                self.plotAverageScale()
+                self.plotAverageScale(),
+                self.plotMotherWavelet()
             ]
         )(*axs)
         axs[0].set_xlim([self.t.min(), self.t.max()])
-        return (fig, dict(zip(["a", "b", "c", "d"], axs)))
+        #axs[3].set_xlim([self.t.min(), self.t.max()])
+        return (fig, dict(zip(["a", "b", "c", "d","e"], axs)))
 
     def setTextSize(self):
         def plot(axes):
@@ -849,13 +861,13 @@ class CWT:
             # Global wavelet power spectora
             cx.plot(
                 var * glbl_power, np.log2(period),
-                'k-', linewidth=1.5
+                '-', color="#1146b3" , linewidth=1.5
             )
 
             # 95% confident spectora
             cx.plot(
                 glbl_signif, np.log2(period),
-                'k--'
+                '--', color="#2196f3"
             )
 
             # Red noise spectora
@@ -863,6 +875,9 @@ class CWT:
                 var * fft_theor, np.log2(period),
                 '--', color='#cccccc'
             )
+
+            cx.set_xscale("log")
+
 
             cx.set_title('c) Global Wavelet Spectrum',
                          fontsize=self.style["titleSize"])
@@ -873,7 +888,11 @@ class CWT:
                                     np.ceil(np.log2(period.max())))
             cx.set_yticks(np.log2(Yticks))
             cx.set_yticklabels(Yticks)
-            plt.setp(cx.get_yticklabels(), visible=False)
+            cx.yaxis.tick_right()
+            cx.yaxis.set_label_position("right")
+            cx.yaxis.set_ticks_position("both")
+            plt.setp(cx.get_yticklabels(), visible=True)
+
             return cx
         return plot
 
@@ -896,4 +915,13 @@ class CWT:
                           fontsize=self.style["labelSize"])
 
             return dx
+        return plot
+
+    def plotMotherWavelet(self):
+        def plot(ex):
+            t = np.arange(-5, 5, 0.01)
+            ex.plot(t, [self.mother.psi(x)for x in t],color="black")
+            ex.set_title("Mother wavelet", fontsize=self.style["titleSize"])
+            ex.tick_params(bottom=False,left=False,labelbottom=False,labelleft=False)
+            return ex
         return plot
