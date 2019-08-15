@@ -48,6 +48,230 @@ def isAllIn(obj: Dict[Any, Any]) -> Callable[[List[Any]], bool]:
         it.mapping(lambda prop: prop in obj)(props)
     )
 
+class FourierSpectora:
+    def __init__(self, fft, freqs):
+        """
+        parameters
+        ----------
+        fft: np.ndarray
+        freqs: np.ndarray
+        """
+        self.spectora = fft
+        self.freqs = freqs
+
+    def get_specora(self):
+        return self.spectora
+
+    def get_freqs(self):
+        return self.freqs
+
+    def get_periods(self):
+        return 1/self.freqs
+
+    def get_power(self):
+        return np.abs(self.spectora) **2
+
+class WaveletSettings:
+    def __init__(
+        self,
+        signal_length=0,
+        dt=0,
+        time_unit="",
+        minimum_scale=None,
+        number_of_scale=None,
+        sub_octave_scale = 1/2,
+        mother=None,
+        manual_freqs=None,
+        amplitude=0
+    ):
+        self.signal_length = signal_length
+        self.dt = dt
+        self.time_unit = time_unit
+        self._minimum_scale = self.dt*2 if minimum_scale is None else minimum_scale
+        self.number_of_scale = number_of_scale
+        self.sub_octave_scale = sub_octave_scale
+        self.mother = mother
+        self.manual_freqs = manual_freqs
+        self.amplitude = amplitude
+
+    def __repr__(self):
+        return f"dt: {self.dt} [{self.time_unit}]\nnumber of scale: {self.J}\nminimum scale: {self.minimum_scale} [{self.time_unit}]\nsub octave scale: {self.dj}"
+
+    @property
+    def N(self):
+        return self.signal_length
+
+    @property
+    def dj(self):
+        return self.sub_octave_scale
+
+    @dj.setter
+    def dj(self, value):
+        self.sub_octave_scale = value
+
+    @property
+    def minimum_scale(self):
+        return self._minimum_scale
+
+    @minimum_scale.setter
+    def minimum_scale(self, value):
+        self._minimum_scale = self.dt * 2 if value is None else value
+
+    @property
+    def J(self):
+        if self.number_of_scale is None:
+            return np.log2(self.signal_length*self.dt/self.minimum_scale)/self.dj
+        else:
+            return self.number_of_scale
+
+    @J.setter
+    def J(self,value):
+        self.number_of_scale = value
+
+    @property
+    def freqs(self):
+        return self.manual_freqs
+
+    @freqs.setter
+    def freqs(self, value):
+        self.manual_freqs = value
+
+
+
+class WaveletSpectora:
+    def __init__(self, coeffs, scales, freqs, cone_of_influence, rectify, feature):
+        self.coeffs = coeffs
+        self.scales = scales
+        self.freqs = freqs
+        self.coi = cone_of_influence
+        self.rectify = rectify
+        self.feature = feature
+
+    @property
+    def alpha(self):
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self,value):
+        self._alpha = value
+
+    def get_scales(self):
+        return self.scales
+
+    def get_freqs(self):
+        return self.freqs
+
+    def get_periods(self):
+        return 1/self.freqs
+
+    def get_power(self):
+        power = np.abs(self.coeffs) ** 2
+        if self.rectify:
+            return power / self.scales[:,None]
+        else:
+            return power
+
+    def get_global_power(self):
+        return self.get_power().mean(axis=1)
+
+    def inverse(self):
+        return wavelet.icwt(
+            self.coeffs,
+            self.scales,
+            self.feature.dt,
+            self.feature.dj,
+            self.feature.mother
+        ) * self.feature.amplitude
+
+    def __get_significance(self, alpha, threshold, variance=1., dof=None, test_type=None):
+        test_id = {
+            "global" : 0,
+            "scale-average" : 2,
+        }
+
+        def unknown_test_error(key):
+            raise KeyError(f"Unknown test type {key}. Select from {test_id.keys()}")
+
+        return wavelet.significance(
+            variance,
+            self.feature.dt,
+            self.get_scales(),
+            test_id.get(test_type,unknown_test_error),
+            alpha,
+            significance_level=threshold,
+            wavelet = self.feature.mother,
+            **({} if dof is None else {"dof":dof})
+        )
+
+    def get_significant_power(self, alpha, threshold):
+        """
+        Return
+        -------
+        significantPower : array like
+            Significance levels as a function of scale.
+        """
+        significance,_ = self.__get_significance(alpha, threshold, test_type="global")
+        mask = np.ones([1, self.feature.N]) * significance[:,None]
+        return self.get_power() / mask
+
+    def get_theoretical_fft(self, alpha, threshold):
+        """
+        Return
+        -------
+        fft_theor (array like):
+            Theoretical red-noise spectrum as a function of period.
+
+        """
+        _, fft_theor = self.__get_significance(alpha,threshold, test_type="global")
+        return fft_theor
+
+    def get_global_significance(self, alpha, threshold):
+        """
+        Then, we determine significance level
+        of the global wavelet spectrum.
+        """
+        dof = self.feature.N - self.get_scales()
+        signif, _ = self.__get_significance(
+            alpha,
+            threshold,
+            self.feature.amplitude**2,
+            dof,
+            test_type="global"
+        )
+        return signif
+
+    def get_averaged_scale(self, period_filter):
+        energy = self.feature.amplitude**2
+        selector = find(period_filter(self.get_periods()))
+        interval = self.feature.dj * self.feature.dt
+        cdelta = self.feature.mother.cdelta
+
+        return pip(
+            lambda scales: scales.transpose(),
+            lambda scales: self.get_power()/scales,
+            lambda scales: scales[selector, :].sum(axis=0),
+            lambda global_scale: energy * interval * global_scale / cdelta
+        )(self.get_scales() * np.ones((self.feature.N, 1)))
+
+    def get_averaged_scale_significance(self, period_filter,alpha, threshold):
+        """
+        Performs a scale-average test (equations 25 to 28).
+        In this case dof should be set to a two element vector [s1, s2],
+            which gives the scale range that were averaged together.
+        If, for example, the average between scales 2 and 8 was taken, then dof=[2, 8].
+        """
+        selector = find(period_filter(self.get_periods()))
+
+        scales = self.get_scales()
+        dof = [scales[selector[0]],scales[selector[-1]]]
+        signif, _ = self.__get_significance(
+            alpha,
+            threshold,
+            self.feature.amplitude**2,
+            dof,
+            test_type="scale-average"
+        )
+        return signif
 
 class CWT:
 
@@ -74,18 +298,33 @@ class CWT:
         t = numpy.arange(100)
         x = genSignal(t)
         cwt = CWT(t,x)
+
+        Example
+        =======
+        CWT(t,x)\
+            .setTimeInterval(dt)\
+            .setMinimumScale(dt*2)\
+            .setSubOctave(1/2)\
+            .setNumberOfScale()\
+            .setMotherWavelet(wavelet.Morlet(6))\
+            .auto()\
+            .plot()
         """
+
         self.t = t
         self.signal = signal
-        self.N = len(signal)
-        self.dat_norm, self.std = pip(
+
+        self.dat_norm, std = pip(
             CWT.detrend if detrend else identity,
             CWT.normalized
         )(signal)
-        self.filterPeriod = lambda period: True
+        self.period_filter = lambda period: np.array([True for v in period])
         self.verbose = verbose
-        self.J = -1
-        self.freqs = None
+        self.feature = WaveletSettings(
+            signal_length = len(signal),
+            amplitude = std
+        )
+
         self.threshold = 0.95
 
         self.style = {
@@ -101,23 +340,16 @@ class CWT:
             "bottom": 1
         }
 
+    def __new__(cls, *arg, **kwargs):
+        return super().__new__(cls)
+
     @staticmethod
-    def setup(t: VectorD, signal: VectorD, detrend: bool=True, verbose: bool=False):
+    def setup(*arg, **kwargs):
         """
         Helper method for initiating method chain style operation.
-
-        Example
-        =======
-        CWT.setup(t,x)\
-            .setTimeInterval(dt)\
-            .setMinimumScale(dt*2)\
-            .setSubOctave(1/2)\
-            .setNumberOfScale()\
-            .setMotherWavelet(wavelet.Morlet(6))\
-            .auto()\
-            .plot()
         """
-        return CWT(t, signal, detrend, verbose)
+        print("CWT.setup() is deprecated. Use CWT() as constructor.")
+        return CWT(*arg, **kwargs)
 
     @staticmethod
     def detrend(x: VectorD) -> VectorD:
@@ -137,7 +369,7 @@ class CWT:
         unit: str="",
         minimum_scale: Optional[List[Number]]=None,
         sub_octave: Number=2,
-        number_of_scale: Number=-1,
+        number_of_scale: Number=None,
         freqs: Optional[List[Number]] = None
     ):
         """
@@ -200,8 +432,8 @@ class CWT:
         cwt.setTimeInterval(1/12, unit="year")
         """
 
-        self.dt = dt
-        self.timeUnit = unit
+        self.feature.dt = dt
+        self.feature.time_unit = unit
         return self
 
     def setMinimumScale(self, s0=None):
@@ -225,7 +457,7 @@ class CWT:
         cwt.setTimeInterval(1,unit="year")
         cwt.setMinimumScale(1 * 2)
         """
-        self.s0 = s0 if s0 != None else self.dt * 2
+        self.feature.minimum_scale = s0
         return self
 
     def setSubOctave(self, n=2):
@@ -249,10 +481,10 @@ class CWT:
         cwt.setTimeInterval(1,unit="year")
         cwt.setSubOctave(12)
         """
-        self.dj = 1/n
+        self.feature.dj = 1/n
         return self
 
-    def setNumberOfScale(self, J=-1):
+    def setNumberOfScale(self, J=None):
         """
         Set number of scales calculated by cwt.
 
@@ -271,13 +503,10 @@ class CWT:
         =======
         cwt.setNumberOfScale(100)
         """
-        if (self.verbose):
-            print(
-                "Number of scale is",
-                np.log2(self.N * self.dt / self.s0)/self.dj if J == -1 else J
-            )
 
-        self.J = J
+
+        self.feature.J = J
+
         return self
 
     def setFrequency(self, freqs=None):
@@ -298,7 +527,7 @@ class CWT:
         =======
         cwt.setFrequency(numpy.array([64, 32, 16, 8, 4, 2, 1, 0.5, 0.25]))
         """
-        self.freqs = freqs
+        self.feature.freqs = freqs
         return self
 
     def setMothorWavelet(self, mother=wavelet.Morlet(6)):
@@ -324,7 +553,7 @@ class CWT:
         cwt.setMotherWavelet(wavelet.Morlet(6))
         cwt.setMotherWavelet(wavelet.Paul())
         """
-        self.mother = mother
+        self.feature.mother = mother
         return self
 
     def setPValue(self, p=0.05):
@@ -350,7 +579,7 @@ class CWT:
         self.threshold = 1 - p
         return self
 
-    def filterPeriodBy(self, pred: Callable[[VectorD], bool]=lambda period: True):
+    def filterPeriodBy(self, pred: Callable[[VectorD], bool]=lambda period: np.array([True for v in period])):
         """
         Set predicate function to filter periods for calculating
             average energy.
@@ -372,13 +601,13 @@ class CWT:
         cwt.filterPeriodBy(lambda period: (1 <= period) & (period < 10))
         """
 
-        self.filterPeriod = pred
+        self.period_filter = pred
         return self
 
     def __setupCompleted(self):
         return isAllIn(self)(["dt", "dj", "s0", "mothor"])
 
-    def cwt(self):
+    def cwt(self,rectify=False):
         """
         Operating cwt.
 
@@ -412,107 +641,45 @@ class CWT:
         -------
         wave, scales, coi, fft, fft_freqs = cwt.cwt()
         """
-        self.wave, \
-            self.scales, \
-            self.freqs, \
-            self.coi, \
-            self.fft, \
-            self.fft_freqs \
+        wave, \
+        scales, \
+        freqs, \
+        coi, \
+        fft, \
+        fft_freqs \
             = wavelet.cwt(
                 self.dat_norm,
-                self.dt,
-                self.dj,
-                self.s0,
-                self.J,
-                self.mother,
-                self.freqs
+                self.feature.dt,
+                self.feature.dj,
+                self.feature.minimum_scale,
+                self.feature.J,
+                self.feature.mother,
+                self.feature.freqs
             )
 
-        return (
-            self.wave,
-            self.scales,
-            self.freqs,
-            self.coi,
-            self.fft,
-            self.fft_freqs,
+        wavelet_spectra = WaveletSpectora(
+            wave,
+            scales,
+            freqs,
+            coi,
+            rectify,
+            self.feature
         )
 
-    def icwt(self):
-        """
-        Operate inverse cwt with waves obtained by cwt.
+        fourier_spectra = FourierSpectora(
+            fft,
+            fft_freqs
+        )
 
-        Parameter
-        ---------
-        None
+        self.wavelet_spectra = wavelet_spectra
+        self.fourier_spectra = fourier_spectra
 
-        Return
-        ------
-        iwave : numpy.ndarray
-            Inverse wavelet transform.
+        return (
+            wavelet_spectra,
+            fourier_spectra
+        )
 
-        Example
-        -------
-        iwave = cwt.icwt()
-        """
-        self.iwave = wavelet.icwt(
-            self.wave,
-            self.scales,
-            self.dt,
-            self.dj,
-            self.mother
-        ) * self.std
-        return self.iwave
 
-    def getPower(self, rectify=False):
-        """
-        Calculate the normalized wavelet and Fourier power spectra.
-        Optionally, you can also rectify the power spectrum
-            according to the suggestions proposed by Liu et al. (2007)[2]
-
-        Parameter
-        ---------
-        rectify: bool, optional
-            Flag for rectification of power.
-            Default is False
-
-        Return
-        ------
-        power: numpy.ndarray
-            Power of wavelets.
-            Has (J+1) x N dimensions.
-
-        fft_power: numpy.ndarray
-            Power of FFT.
-
-        Example
-        -------
-        power, fft_power = cwt.getPower()
-        """
-        self.power = (np.abs(self.wave)) ** 2 if rectify == False\
-            else (np.abs(self.wave)) ** 2 / self.scales[:, None]
-        self.fft_power = np.abs(self.fft) ** 2
-
-        return (self.power, self.fft_power)
-
-    def getPeriod(self):
-        """
-        Periods of wavelets.
-
-        Parameter
-        ---------
-        None
-
-        Return
-        ------
-        period: array like
-            Vector of periods in unit of time.
-
-        Example
-        -------
-        period = cwt.getPeriod()
-        """
-        self.period = 1 / self.freqs
-        return self.period
 
     def getAlpha(self):
         """
@@ -521,130 +688,27 @@ class CWT:
         self.alpha, var, mu2 = wavelet.ar1(self.signal)
 
         if self.verbose:
-            print("Variance of red noise: ", var * self.std**2)
-            #print("Mean square of red noise: ", mu2 * self.std**2)
+            print(f"Variance of signal: {self.wavelet_spectra.feature.amplitude**2}")
+            print("Variance of red noise: ", var * self.feature.amplitude**2)
+            print("Mean square of red noise: ", mu2 * self.feature.amplitude**2)
 
         return self.alpha
 
-    def getSignificantPower(self):
-        """
-        We could stop at this point and plot our results. However we are also
-        interested in the power spectra significance test.
-        The power is significant where the ratio power / sig95 > 1.
 
-        Return
-        -------
-        significantPower : array like
-            Significance levels as a function of scale.
-        fft_theor (array like):
-            Theoretical red-noise spectrum as a function of period.
-        """
-
-        signif, self.fft_theor = wavelet.significance(
-            1.0,
-            self.dt,
-            self.scales,
-            0,
-            self.alpha,
-            significance_level=self.threshold,
-            wavelet=self.mother
-        )
-
-        sig95 = np.ones([1, self.N]) * signif[:, None]
-
-        self.significantPower = self.power / sig95  # sig95
-        return (self.significantPower, self.fft_theor)
-
-    def getGlobalSignificance(self):
-        """
-        Then, we determine significance level
-        of the global wavelet spectrum.
-        """
-
-        var = self.std**2
-        dof = self.N - self.scales  # Correction for padding at edges
-
-        self.glbl_signif, _ = wavelet.significance(
-            var,
-            self.dt,
-            self.scales,
-            0.,
-            self.alpha,
-            significance_level=self.threshold, dof=dof,
-            wavelet=self.mother
-        )
-        return self.glbl_signif
-
-    def getGlobalPower(self):
-        """
-        各周期のpowerの, 時間方向の平均値.
-        """
-        self.glbl_power = self.power.mean(axis=1)
-        return self.glbl_power
-
-    def getAverageScale(self):
-        E = self.std**2
-        sel = find(self.filterPeriod(self.period))
-        interval = self.dj * self.dt
-        Cdelta = self.mother.cdelta
-
-        scale_avg = pip(
-            lambda scale: scale.transpose(),
-            lambda scale: self.power / scale,
-            lambda scaled: scaled[sel, :].sum(axis=0),
-            lambda glbl_scale: E * interval * glbl_scale / Cdelta
-        )(self.scales * np.ones((self.N, 1)))
-
-        self.scale_avg = scale_avg
-        return self.scale_avg
-
-    def getAverageScaleSignificance(self):
-        """
-        Performs a scale-average test (equations 25 to 28).
-        In this case dof should be set to a two element vector [s1, s2],
-            which gives the scale range that were averaged together.
-        If, for example, the average between scales 2 and 8 was taken, then dof=[2, 8].
-        """
-
-        var = self.std**2
-        sel = find(self.filterPeriod(self.period))
-        scale_avg_signif, _ = wavelet.significance(
-            var,
-            self.dt,
-            self.scales,
-            2,
-            self.alpha,
-            significance_level=self.threshold,
-            dof=[
-                self.scales[sel[0]], self.scales[sel[-1]]
-            ],
-            wavelet=self.mother
-        )
-        self.scale_avg_signif = scale_avg_signif
-        return self.scale_avg_signif
-
-    def auto(self):
+    def auto(self, rectify=False):
         """
         Automatic operation of cwt and plotting result.
         """
         if (not self.__setupCompleted):
             raise SystemError("setup not completed.")
 
-        self.cwt()
-        self.icwt()
-        self.getPower()
-        self.getPeriod()
+        self.cwt(rectify)
         self.getAlpha()
-        self.getSignificantPower()
-        self.getGlobalSignificance()
-        self.getGlobalPower()
-        self.getAverageScale()
-        self.getAverageScaleSignificance()
 
         if (self.verbose):
-            print("scale: ", self.scales)
-            print("period: ", self.period)
-            print("variance of signal:", self.std**2)
+            print(self.feature)
+            print("scale: ", self.wavelet_spectra.get_scales())
+            print("period: ", self.wavelet_spectra.get_periods())
 
         return self
 
@@ -752,7 +816,7 @@ class CWT:
         }
 
         def plot(ax):
-            ax.plot(self.t, self.iwave, **st)
+            ax.plot(self.t, self.wavelet_spectra.inverse(), **st)
             return ax
         return plot
 
@@ -765,18 +829,19 @@ class CWT:
         def plot(bx):
 
             t = self.t
-            period = self.period
-
+            period = self.wavelet_spectra.get_periods()
+            power = self.wavelet_spectra.get_power()
             levels = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16]
+
             bx.contourf(
-                t, np.log2(period), np.log2(self.power), np.log2(levels),
+                t, np.log2(period), np.log2(power), np.log2(levels),
                 extend='both', cmap=plt.cm.viridis
             )
 
             bx.set_ylim([np.log2(period.min()), np.log2(period.max())])
             bx.set_title('b) Wavelet Power Spectrum ',
                          fontsize=self.style["titleSize"])
-            bx.set_ylabel('Period ['+self.timeUnit+']',
+            bx.set_ylabel('Period ['+self.wavelet_spectra.feature.time_unit+']',
                           fontsize=self.style["labelSize"])
 
             Yticks = 2 ** np.arange(np.ceil(np.log2(period.min())),
@@ -796,13 +861,13 @@ class CWT:
 
         def plot(bx):
             t = self.t
-            period = self.period
+            period = self.wavelet_spectra.get_periods()
 
             extent = [t.min(), t.max(), 0, max(period)]
 
             # contour of significance
             bx.contour(
-                t, np.log2(period), self.significantPower, [-99, 1],
+                t, np.log2(period), self.wavelet_spectra.get_significant_power(self.alpha, self.threshold), [-99, 1],
                 extent=extent,
                 **st
             )
@@ -822,8 +887,8 @@ class CWT:
 
         def plot(bx):
             t = self.t
-            period = self.period
-            coi = self.coi
+            period = self.wavelet_spectra.get_periods()
+            coi = self.wavelet_spectra.coi
             # cone of influence
             bx.fill(
                 np.concatenate(
@@ -844,17 +909,17 @@ class CWT:
         """
         def plot(cx):
 
-            var = self.std**2
-            glbl_power = self.glbl_power
-            glbl_signif = self.glbl_signif
-            period = self.period
-            fft_theor = self.fft_theor
-            fft_power = self.fft_power
-            fft_freqs = self.fft_freqs
+            var = self.wavelet_spectra.feature.amplitude**2
+            glbl_power = self.wavelet_spectra.get_global_power()
+            glbl_signif = self.wavelet_spectra.get_global_significance(self.alpha, self.threshold)
+            period = self.wavelet_spectra.get_periods()
+            fft_theor = self.wavelet_spectra.get_theoretical_fft(self.alpha, self.threshold)
+            fft_power = self.fourier_spectra.get_power()
+            fft_periods = self.fourier_spectra.get_periods()
 
             # Fourier power spectora
             cx.plot(
-                var * fft_power, np.log2(1./fft_freqs),
+                var * fft_power, np.log2(fft_periods),
                 '-', color='#cccccc', linewidth=1.
             )
 
@@ -900,16 +965,16 @@ class CWT:
         def plot(dx):
             # Fourth sub-plot, the scale averaged wavelet spectrum.
             dx.axhline(
-                self.scale_avg_signif,
+                self.wavelet_spectra.get_averaged_scale_significance(self.period_filter,self.alpha, self.threshold),
                 color='k', linestyle='--', linewidth=1.
             )
             dx.plot(
-                self.t, self.scale_avg,
+                self.t, self.wavelet_spectra.get_averaged_scale(self.period_filter),
                 'k-', linewidth=1.5
             )
             dx.set_title('d) scale-averaged power',
                          fontsize=self.style["titleSize"])
-            dx.set_xlabel('Time ['+self.timeUnit+']',
+            dx.set_xlabel('Time ['+self.wavelet_spectra.feature.time_unit+']',
                           fontsize=self.style["labelSize"])
             dx.set_ylabel(r'Average variance []',
                           fontsize=self.style["labelSize"])
@@ -920,7 +985,7 @@ class CWT:
     def plotMotherWavelet(self):
         def plot(ex):
             t = np.arange(-5, 5, 0.01)
-            ex.plot(t, [self.mother.psi(x)for x in t],color="black")
+            ex.plot(t, [self.wavelet_spectra.feature.mother.psi(x)for x in t],color="black")
             ex.set_title("Mother wavelet", fontsize=self.style["titleSize"])
             ex.tick_params(bottom=False,left=False,labelbottom=False,labelleft=False)
             return ex
