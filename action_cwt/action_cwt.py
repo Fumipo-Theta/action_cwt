@@ -3,7 +3,7 @@ from pycwt.helpers import find
 import numpy as np
 from func_helper import pip, identity, over_args
 import iter_helper as it
-from structured_plot import Layout
+from structured_plot import Layout, Figure, Subplot, plot_action
 import matplotlib.pyplot as plt
 
 from typing import List, Tuple, TypeVar, Union, Callable, Dict, Any, NewType, Type, Optional
@@ -24,6 +24,11 @@ Limit = Union[List[Number], Tuple[Number, Number]]
 T = TypeVar("T")
 VectorD = NewType("VectorD", np.ndarray)
 
+axes_style={
+            "label" : {"fontsize":16},
+            "tick" : {"labelsize": 14},
+            "title" : {"fontsize":16}
+        }
 
 def isAllTrue(arr: List[bool]) -> bool:
     return it.reducing(lambda a, b: a and b)(arr)(True)
@@ -328,9 +333,9 @@ class CWT:
         self.threshold = 0.95
 
         self.style = {
-            "labelSize": 16,
-            "tickSize": 14,
-            "titleSize": 16,
+            "label" : {"fontsize":16},
+            "tick" : {"labelsize": 14},
+            "title" : {"fontsize":16}
         }
 
         self.padding = {
@@ -740,9 +745,6 @@ class CWT:
         # Signal and inversed sugnal
         layout.add_origin("a", (10, 2))
 
-        # Mother wavelet
-        layout.add_right("a", "e", (1.5, 1.5), margin=0.25,offset=(0.75,0.25))
-
         # Spector
         layout.add_bottom("a", "b", (10, 6), margin=1, sharex="a")
 
@@ -751,6 +753,22 @@ class CWT:
 
         # Variance
         layout.add_bottom("b","d", (10,2), margin=1, sharex="a")
+
+        # Mother wavelet
+        layout.add_right("a", "e", (1.5, 1.5),
+                         margin=0.25, offset=(0.75, 0.25))
+
+        return Figure().add_subplot(
+            self.plotSignal(Subplot(axes_style))\
+            + self.plotInversedSignal(Subplot(axes_style)),
+            self.plotSpector(Subplot(axes_style))\
+            +self.plotSignificantSpector(Subplot(axes_style))\
+            +self.plotConeOfInfluence(Subplot(axes_style)),
+            self.plotGlobalPower(
+                Subplot(axes_style, ylabel={"ylabelposition": "right"})),
+            self.plotAverageScale(Subplot(axes_style)),
+            self.plotMotherWavelet(Subplot(axes_style))
+        ).show(layout)
 
         fig, axs = layout.figure_and_axes(
             subgrids, self.padding, **kwargs
@@ -780,7 +798,7 @@ class CWT:
             return axes
         return plot
 
-    def plotSignal(self, style={}):
+    def plotSignal(self, subplot,style={}):
         """
         Plot original signal and inversed signal.
         """
@@ -793,6 +811,14 @@ class CWT:
             **style
         }
 
+        return subplot.add(
+            data=None,
+            x=self.t,
+            y=CWT.detrend(self.signal),
+            plot=plot_action.line(**st),
+            xlim=[self.t.min(), self.t.max()]
+        )
+
         def plot(ax):
 
             ax.plot(self.t, CWT.detrend(self.signal),
@@ -802,7 +828,7 @@ class CWT:
             return ax
         return plot
 
-    def plotInversedSignal(self, style={}):
+    def plotInversedSignal(self, subplot,style={}):
         """
         plot inversed signal
         """
@@ -815,24 +841,48 @@ class CWT:
             **style
         }
 
+        return subplot.add(
+            data=None,
+            x=self.t,
+            y=self.wavelet_spectra.inverse(),
+            plot=plot_action.line(**st)
+        )
+
         def plot(ax):
             ax.plot(self.t, self.wavelet_spectra.inverse(), **st)
             return ax
         return plot
 
-    def plotSpector(self):
+    def plotSpector(self,subplot):
         """
         Second sub-plot, the normalized wavelet power spectrum and significance
             level contour lines and cone of influece hatched area. Note that period
             scale is logarithmic.
         """
+        t = self.t
+        period = self.wavelet_spectra.get_periods()
+        power = self.wavelet_spectra.get_power()
+        levels = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16]
+        Yticks = 2 ** np.arange(np.ceil(np.log2(period.min())),
+            np.ceil(np.log2(period.max())))
+
+        return subplot.add(
+            data=None,
+            x=t,
+            y=np.log2(period),
+            z=np.log2(power),
+            levels=np.log2(levels),
+            cmap=plt.cm.viridis,
+            plot=plot_action.contourf(extend='both'),
+            ylabel=f'Period [{self.wavelet_spectra.feature.time_unit}]',
+            ylim=[np.log2(period.min()), np.log2(period.max())],
+            ytick={
+                "locations": np.log2(Yticks),
+                "labels": Yticks
+            }
+        )
+
         def plot(bx):
-
-            t = self.t
-            period = self.wavelet_spectra.get_periods()
-            power = self.wavelet_spectra.get_power()
-            levels = [0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16]
-
             bx.contourf(
                 t, np.log2(period), np.log2(power), np.log2(levels),
                 extend='both', cmap=plt.cm.viridis
@@ -852,19 +902,30 @@ class CWT:
             return bx
         return plot
 
-    def plotSignificantSpector(self, style={}):
+    def plotSignificantSpector(self, subplot,style={}):
         st = {
             "linewidths": 1,
             "colors": "k",
+            "alpha":0.5,
             **style
         }
 
+        t = self.t
+        period = self.wavelet_spectra.get_periods()
+        extent = [t.min(), t.max(), 0, max(period)]
+
+        return subplot.add(
+            data=None,
+            x=t,
+            y=np.log2(period),
+            z=self.wavelet_spectra.get_significant_power(
+                self.alpha, self.threshold),
+            levels=[-99, 1],
+            extent=extent,
+            plot=plot_action.contour(**st)
+        )
+
         def plot(bx):
-            t = self.t
-            period = self.wavelet_spectra.get_periods()
-
-            extent = [t.min(), t.max(), 0, max(period)]
-
             # contour of significance
             bx.contour(
                 t, np.log2(period), self.wavelet_spectra.get_significant_power(self.alpha, self.threshold), [-99, 1],
@@ -874,21 +935,31 @@ class CWT:
             return bx
         return plot
 
-    def plotConeOfInfluence(self, style={}):
+    def plotConeOfInfluence(self, subplot,style={}):
         """
         Plot mask of cone of influence
         """
         st = {
-            "c": "k",
+            "color": "k",
             "alpha": 0.3,
             "hatch": "x",
             **style
         }
 
+        t = self.t
+        period = self.wavelet_spectra.get_periods()
+        coi = self.wavelet_spectra.coi
+
+        return subplot.add(
+            data=None,
+            x=np.concatenate([t, t[-1:], t[-1:], t[:1], t[:1]]),
+            y=np.concatenate(
+                [np.log2(coi), [1e-9], np.log2(period[-1:]), np.log2(period[-1:]), [1e-9]]),
+            plot=plot_action.fill(**st)
+        )
+
         def plot(bx):
-            t = self.t
-            period = self.wavelet_spectra.get_periods()
-            coi = self.wavelet_spectra.coi
+
             # cone of influence
             bx.fill(
                 np.concatenate(
@@ -901,21 +972,57 @@ class CWT:
             return bx
         return plot
 
-    def plotGlobalPower(self):
+    def plotGlobalPower(self,subplot):
         """
         Third sub-plot, the global wavelet and Fourier power spectra and
             theoretical noise spectra.
         Note that period scale is logarithmic.
         """
+        var = self.wavelet_spectra.feature.amplitude**2
+        glbl_power = self.wavelet_spectra.get_global_power()
+        glbl_signif = self.wavelet_spectra.get_global_significance(
+                self.alpha, self.threshold)
+        period = self.wavelet_spectra.get_periods()
+        fft_theor = self.wavelet_spectra.get_theoretical_fft(
+                self.alpha, self.threshold)
+        fft_power = self.fourier_spectra.get_power()
+        fft_periods = self.fourier_spectra.get_periods()
+        Yticks = 2 ** np.arange(np.ceil(np.log2(period.min())),np.ceil(np.log2(period.max())))
+
+        return subplot.add(
+            data=None,
+            x=var * fft_power,
+            y=np.log2(fft_periods),
+            plot=plot_action.line(linestyle='-', color='#cccccc', linewidth=1.),
+            xlabel="Power",
+            xlim=[0, fft_power.max() * var],
+            ylim=np.log2([period.min(), period.max()]),
+            tick=dict(labelleft=False, left=False,
+                      labelright=True, right=True),
+            ytick={
+                "locations" : np.log2(Yticks),
+                "labels" : Yticks
+            },
+        ).add(
+            data=None,
+            x=var * glbl_power,
+            y=np.log2(period),
+            plot=plot_action.line(linestyle='-', color="#1146b3" , linewidth=1.5)
+        ).add(
+            data=None,
+            x=glbl_signif,
+            y=np.log2(period),
+            plot=plot_action.line(linestyle='--', color="#2196f3")
+        ).add(
+            data=None,
+            x=var * fft_theor,
+            y=np.log2(period),
+            plot=plot_action.line(linestyle='--', color='#cccccc'),
+            xscale="log",
+        )
+
         def plot(cx):
 
-            var = self.wavelet_spectra.feature.amplitude**2
-            glbl_power = self.wavelet_spectra.get_global_power()
-            glbl_signif = self.wavelet_spectra.get_global_significance(self.alpha, self.threshold)
-            period = self.wavelet_spectra.get_periods()
-            fft_theor = self.wavelet_spectra.get_theoretical_fft(self.alpha, self.threshold)
-            fft_power = self.fourier_spectra.get_power()
-            fft_periods = self.fourier_spectra.get_periods()
 
             # Fourier power spectora
             cx.plot(
@@ -961,7 +1068,20 @@ class CWT:
             return cx
         return plot
 
-    def plotAverageScale(self):
+    def plotAverageScale(self, subplot):
+        return subplot.add(
+            data=None,
+            ypos=self.wavelet_spectra.get_averaged_scale_significance(self.period_filter,self.alpha, self.threshold),
+            plot=plot_action.xband(color='k', linestyle='--', linewidth=1.),
+            xlabel='Time ['+self.wavelet_spectra.feature.time_unit+']',
+            ylabel='Average variance []'
+        ).add(
+            data=None,
+            x=self.t,
+            y=self.wavelet_spectra.get_averaged_scale(self.period_filter),
+            plot=plot_action.line(color="k", linewidth=1.5)
+        )
+
         def plot(dx):
             # Fourth sub-plot, the scale averaged wavelet spectrum.
             dx.axhline(
@@ -982,7 +1102,17 @@ class CWT:
             return dx
         return plot
 
-    def plotMotherWavelet(self):
+    def plotMotherWavelet(self, subplot):
+        t = np.arange(-5, 5, 0.01)
+        return subplot.add(
+            data=None,
+            x=t,
+            y=[self.wavelet_spectra.feature.mother.psi(x)for x in t],
+            plot=plot_action.line(color="k"),
+            tick=dict(bottom=False, left=False,
+                      labelbottom=False, labelleft=False)
+        )
+
         def plot(ex):
             t = np.arange(-5, 5, 0.01)
             ex.plot(t, [self.wavelet_spectra.feature.mother.psi(x)for x in t],color="black")
